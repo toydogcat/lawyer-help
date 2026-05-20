@@ -5,7 +5,11 @@ import { useEmbedding, type VectorChunk } from './hooks/useEmbedding';
 import { FileIngestion } from './components/FileIngestion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Scale, Send, ShieldCheck, Settings, MessageSquare, Info, Loader2, Clock, Search, Calculator, Database, X } from 'lucide-react';
+import { 
+    Scale, Send, ShieldCheck, Settings, MessageSquare, Info, Loader2, 
+    Clock, Search, Calculator, Database, X, RotateCcw, User, Cpu, Trash2, CheckCircle2,
+    Maximize2, Activity, Sliders
+} from 'lucide-react';
 
 interface Message {
     role: 'user' | 'assistant' | 'system';
@@ -15,12 +19,47 @@ interface Message {
 function App() {
     const { engine, progress, status, isLoaded, init } = useWebLLM();
     const { indexDocument, getEmbedding, cosineSimilarity, isIndexing } = useEmbedding();
+    
+    // State
     const [vectorDB, setVectorDB] = useState<VectorChunk[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
+    
+    // User Prefs
+    const [userName, setUserName] = useState('使用者');
+    const [userRole, setUserRole] = useState('一般民眾');
+    const [autoClearPDF, setAutoClearPDF] = useState(false);
+    const [chatWidth, setChatWidth] = useState(800);
+    
+    // LLM Parameters
+    const [temperature, setTemperature] = useState(0.7);
+    const [topP, setTopP] = useState(0.95);
+    const [topK, setTopK] = useState(40);
+    
+    // Memory Analytics
+    const [sessionSize, setSessionSize] = useState({ messages: 0, vectors: 0 });
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const msgSize = messages.reduce((acc, m) => acc + (m.content.length * 2), 0);
+        const vecSize = vectorDB.reduce((acc, v) => acc + (v.text.length * 2) + (v.embedding.length * 4), 0);
+        setSessionSize({ messages: msgSize, vectors: vecSize });
+    }, [messages, vectorDB]);
+
+    const handleResetSession = () => {
+        if (window.confirm("確定要清除所有對話紀錄嗎？")) {
+            setMessages([]);
+            setIsThinking(false);
+            if (autoClearPDF) setVectorDB([]);
+        }
+    };
+
+    const clearOnlyPDF = () => {
+        if (window.confirm("確定要移除所有已索引的文件片段嗎？")) setVectorDB([]);
+    };
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,6 +74,14 @@ function App() {
         setVectorDB(prev => [...prev, ...newChunks]);
     };
 
+    const formatSize = (bytes: number) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
     const handleSendMessage = async () => {
         if (!input.trim() || !engine || isThinking) return;
 
@@ -43,16 +90,13 @@ function App() {
         setMessages(prev => [...prev, { role: 'user', content: userQuery }]);
         setIsThinking(true);
 
-        const systemPrompt = `你是一位專業的台灣法律助手。請遵循以下規則：
-1. 使用繁體中文回答。
-2. 若需要外部資訊，請**務必**使用以下格式調用工具並停止輸出：
-   - [CALL: get_current_time()] (獲取現在時間)
-   - [CALL: search_taiwan_law(query="關鍵字")] (查詢台灣法律、判決、法規)
-   - [CALL: search_local_docs(query="關鍵字")] (搜尋使用者剛才上傳的 PDF 文件)
-3. 優先順序：若使用者問的是上傳文件的內容，請先用 search_local_docs。若問的是一般法律，請用 search_taiwan_law。
-4. 如果不需要工具，請直接提供專業的法律建議。
-
-使用者問題：${userQuery}`;
+        const systemPrompt = `你是一位專業的台灣法律助手。
+對象：${userName} (${userRole})
+規則：使用繁體中文，視需要調用工具：
+- [CALL: get_current_time()]
+- [CALL: search_taiwan_law(query="...")]
+- [CALL: search_local_docs(query="...")]
+不需要工具則直接專業回答。`;
 
         const currentMessages: any[] = [
             { role: "system", content: systemPrompt },
@@ -66,6 +110,10 @@ function App() {
                 const chunks = await engine.chat.completions.create({
                     messages: currentMessages,
                     stream: true,
+                    temperature: temperature,
+                    top_p: topP,
+                    // Note: web-llm currently might not support top_k in all engines via this interface, 
+                    // but we include it for future-proofing/compatibility where available.
                 });
 
                 let responseText = "";
@@ -80,9 +128,7 @@ function App() {
                     });
                 }
 
-                // 精準匹配工具調用
                 const timeMatch = responseText.match(/\[CALL:\s*get_current_time\s*\(\)\]/);
-                const mathMatch = responseText.match(/\[CALL:\s*run_math_calculation\(expression="([^"]+)"\)\]/);
                 const lawMatch = responseText.match(/\[CALL:\s*search_taiwan_law\(query="([^"]+)"\)\]/);
                 const localMatch = responseText.match(/\[CALL:\s*search_local_docs\(query="([^"]+)"\)\]/);
 
@@ -90,7 +136,6 @@ function App() {
                 let matchedCall = "";
 
                 if (timeMatch) { toolResult = tool_getTime(); matchedCall = timeMatch[0]; }
-                else if (mathMatch) { toolResult = tool_runMath(mathMatch[1]); matchedCall = mathMatch[0]; }
                 else if (lawMatch) { toolResult = await tool_searchLaw(lawMatch[1]); matchedCall = lawMatch[0]; }
                 else if (localMatch && vectorDB.length > 0) {
                     const queryEmb = await getEmbedding(localMatch[1]);
@@ -98,9 +143,7 @@ function App() {
                         ...chunk,
                         score: cosineSimilarity(queryEmb, chunk.embedding)
                     })).sort((a, b) => b.score - a.score).slice(0, 3);
-                    toolResult = scored.length > 0 
-                        ? scored.map(s => `來自 [${s.source}]: ${s.text}`).join('\n\n')
-                        : "在本地文件中找不到相關資訊。";
+                    toolResult = scored.length > 0 ? scored.map(s => `[${s.source}]: ${s.text}`).join('\n\n') : "無相關文件內容。";
                     matchedCall = localMatch[0];
                 }
 
@@ -110,17 +153,15 @@ function App() {
                         const last = prev[prev.length - 1];
                         return [...prev.slice(0, -1), { ...last, content: last.content + toolMsg }];
                     });
-
                     currentMessages.push({ role: "assistant", content: responseText });
-                    currentMessages.push({ role: "user", content: `[系統工具結果]: ${toolResult}\n請根據以上資訊給出最終繁體中文回答。` });
+                    currentMessages.push({ role: "user", content: `工具結果: ${toolResult}\n請給出最終回答。` });
                     loopCount++;
                     continue;
                 }
                 break;
             }
         } catch (err) {
-            console.error("Chat Error:", err);
-            setMessages(prev => [...prev, { role: 'assistant', content: "抱歉，發生了錯誤。請再試一次。" }]);
+            console.error(err);
         } finally {
             setIsThinking(false);
         }
@@ -128,42 +169,32 @@ function App() {
 
     return (
         <div className="flex h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-cyan-500/30 overflow-hidden">
-            {/* Left Rail / Navigation */}
             <nav className="w-16 flex flex-col items-center py-6 border-r border-neutral-900 bg-black/50 gap-6">
                 <div className="p-2 bg-cyan-600/20 rounded-xl border border-cyan-500/30 mb-4">
                     <Scale className="w-6 h-6 text-cyan-500" />
                 </div>
-                <button 
-                    onClick={() => setShowSettings(false)}
-                    className={`p-3 rounded-xl transition-all ${!showSettings ? 'bg-neutral-800 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-200'}`}
-                >
+                <button onClick={() => setShowSettings(false)} className={`p-3 rounded-xl transition-all ${!showSettings ? 'bg-neutral-800 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-200'}`}>
                     <MessageSquare className="w-6 h-6" />
                 </button>
-                <button 
-                    onClick={() => setShowSettings(true)}
-                    className={`p-3 rounded-xl transition-all ${showSettings ? 'bg-neutral-800 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-200'}`}
-                >
+                <button onClick={() => setShowSettings(true)} className={`p-3 rounded-xl transition-all ${showSettings ? 'bg-neutral-800 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-200'}`}>
                     <Settings className="w-6 h-6" />
                 </button>
             </nav>
 
-            {/* Main Content Area */}
             <main className="flex-1 flex flex-col relative">
-                {/* Header */}
                 <header className="px-8 py-4 border-b border-neutral-900 bg-black/20 flex justify-between items-center backdrop-blur-md">
                     <div>
-                        <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                            台灣法律助手 <span className="text-[10px] bg-cyan-500/10 text-cyan-500 px-1.5 py-0.5 rounded border border-cyan-500/20">PRO</span>
-                        </h1>
+                        <h1 className="text-lg font-bold text-white flex items-center gap-2">台灣法律助手 <span className="text-[10px] bg-cyan-500/10 text-cyan-500 px-1.5 py-0.5 rounded border border-cyan-500/20">PRO</span></h1>
                         <p className="text-xs text-neutral-500">Local AI & RAG Engine</p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-4">
+                        {isLoaded && !showSettings && (
+                            <button onClick={() => handleResetSession()} className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-all" title="重新開始對話">
+                                <RotateCcw className="w-5 h-5" />
+                            </button>
+                        )}
                         {!isLoaded && (
-                            <button 
-                                onClick={init}
-                                disabled={status.includes("正在")}
-                                className="text-xs px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold flex items-center gap-2 transition-all"
-                            >
+                            <button onClick={init} disabled={status.includes("正在")} className="text-xs px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold flex items-center gap-2">
                                 {status.includes("正在") && <Loader2 className="w-3 h-3 animate-spin" />}
                                 啟動 AI
                             </button>
@@ -173,173 +204,132 @@ function App() {
                 </header>
 
                 {showSettings ? (
-                    /* Settings / Setup Page */
-                    <div className="flex-1 overflow-y-auto p-8 max-w-3xl mx-auto w-full animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full animate-in fade-in slide-in-from-right-4 duration-300">
                         <div className="flex justify-between items-center mb-8">
-                            <h2 className="text-2xl font-bold text-white">系統設定</h2>
+                            <h2 className="text-2xl font-bold text-white">進階設定</h2>
                             <button onClick={() => setShowSettings(false)} className="text-neutral-500 hover:text-white"><X className="w-6 h-6" /></button>
                         </div>
 
-                        <div className="space-y-8">
-                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800">
-                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-4 flex items-center gap-2">
-                                    <Database className="w-4 h-4" /> 文件庫 (RAG)
-                                </h3>
-                                <FileIngestion onTextExtracted={handleTextExtracted} isProcessing={isIndexing} />
-                                {vectorDB.length > 0 && (
-                                    <div className="mt-4 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-500">
-                                                <Database className="w-4 h-4" />
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-bold text-emerald-400">已索引完成</p>
-                                                <p className="text-xs text-emerald-600">{vectorDB.length} 個知識片段已準備就緒</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </section>
-
-                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800">
-                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-4 flex items-center gap-2">
-                                    <Info className="w-4 h-4" /> 模型與狀態
-                                </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="p-4 bg-black/30 rounded-xl border border-neutral-800">
-                                        <p className="text-[10px] text-neutral-500 uppercase font-bold mb-1">Model</p>
-                                        <p className="text-sm text-white">Gemma 2B IT</p>
-                                    </div>
-                                    <div className="p-4 bg-black/30 rounded-xl border border-neutral-800">
-                                        <p className="text-[10px] text-neutral-500 uppercase font-bold mb-1">Status</p>
-                                        <p className="text-sm text-cyan-400 truncate">{status}</p>
-                                    </div>
-                                </div>
-                                {progress > 0 && progress < 100 && (
-                                    <div className="mt-4">
-                                        <div className="flex justify-between text-[10px] font-bold text-neutral-500 mb-1">
-                                            <span>LOADING PROGRESS</span>
-                                            <span>{progress}%</span>
-                                        </div>
-                                        <div className="w-full bg-neutral-800 h-1.5 rounded-full overflow-hidden">
-                                            <div className="bg-cyan-500 h-full transition-all duration-300" style={{ width: `${progress}%` }} />
-                                        </div>
-                                    </div>
-                                )}
-                            </section>
-
-                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800">
-                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-4">具備能力</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* User Prefs */}
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><User className="w-4 h-4 text-purple-500" /> 使用者認知</h3>
                                 <div className="space-y-3">
-                                    <div className="flex items-center gap-3 text-sm text-neutral-300">
-                                        <Search className="w-4 h-4 text-cyan-500" /> 查詢台灣法律資料庫 (維基百科接口)
+                                    <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} className="w-full bg-black/40 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500" placeholder="稱呼" />
+                                    <select value={userRole} onChange={(e) => setUserRole(e.target.value)} className="w-full bg-black/40 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500">
+                                        <option value="一般民眾">一般民眾 (白話解釋)</option>
+                                        <option value="法律從業人員">法律從業人員 (專業學理)</option>
+                                        <option value="企業經營者">企業經營者 (風險導向)</option>
+                                    </select>
+                                </div>
+                            </section>
+
+                            {/* Inference Params */}
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Sliders className="w-4 h-4 text-emerald-500" /> 生成參數控制</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                            <label className="text-neutral-500 font-bold">Temperature ({temperature})</label>
+                                            <span className="text-emerald-500">創造力</span>
+                                        </div>
+                                        <input type="range" min="0" max="1.5" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} className="w-full accent-emerald-500 bg-neutral-800 h-1 rounded-lg appearance-none cursor-pointer" />
                                     </div>
-                                    <div className="flex items-center gap-3 text-sm text-neutral-300">
-                                        <Clock className="w-4 h-4 text-cyan-500" /> 讀取目前本地時間
+                                    <div>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                            <label className="text-neutral-500 font-bold">Top-P ({topP})</label>
+                                            <span className="text-emerald-500">核心採樣</span>
+                                        </div>
+                                        <input type="range" min="0.1" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))} className="w-full accent-emerald-500 bg-neutral-800 h-1 rounded-lg appearance-none cursor-pointer" />
                                     </div>
-                                    <div className="flex items-center gap-3 text-sm text-neutral-300">
-                                        <Calculator className="w-4 h-4 text-cyan-500" /> 法律金額與日期計算
+                                    <div>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                            <label className="text-neutral-500 font-bold">Top-K ({topK})</label>
+                                            <span className="text-emerald-500">候選詞數</span>
+                                        </div>
+                                        <input type="range" min="1" max="100" step="1" value={topK} onChange={(e) => setTopK(parseInt(e.target.value))} className="w-full accent-emerald-500 bg-neutral-800 h-1 rounded-lg appearance-none cursor-pointer" />
                                     </div>
                                 </div>
+                            </section>
+
+                            {/* UI Layout */}
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Maximize2 className="w-4 h-4 text-amber-500" /> 介面佈局</h3>
+                                <div className="flex justify-between mb-1">
+                                    <label className="text-[10px] text-neutral-500 font-bold uppercase">對話框寬度 ({chatWidth}px)</label>
+                                </div>
+                                <input type="range" min="400" max="1200" step="50" value={chatWidth} onChange={(e) => setChatWidth(parseInt(e.target.value))} className="w-full accent-amber-500 bg-neutral-800 h-1 rounded-lg appearance-none cursor-pointer" />
+                            </section>
+
+                            {/* Analytics */}
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Activity className="w-4 h-4 text-rose-500" /> 資源監控</h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="p-3 bg-black/30 rounded-xl border border-neutral-800">
+                                        <p className="text-[8px] text-neutral-500 font-bold mb-1">對話快取</p>
+                                        <p className="text-xs text-white font-mono">{formatSize(sessionSize.messages)}</p>
+                                    </div>
+                                    <div className="p-3 bg-black/30 rounded-xl border border-neutral-800">
+                                        <p className="text-[8px] text-neutral-500 font-bold mb-1">文件向量</p>
+                                        <p className="text-xs text-white font-mono">{formatSize(sessionSize.vectors)}</p>
+                                    </div>
+                                </div>
+                            </section>
+
+                            {/* RAG & System */}
+                            <section className="md:col-span-2 bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Database className="w-4 h-4 text-emerald-500" /> 本地法律文件庫</h3>
+                                    {vectorDB.length > 0 && <button onClick={clearOnlyPDF} className="text-[10px] font-bold text-red-400 hover:text-red-300 flex items-center gap-1 px-2 py-1 bg-red-400/10 rounded border border-red-400/20"><Trash2 className="w-3 h-3" /> 移除索引</button>}
+                                </div>
+                                <FileIngestion onTextExtracted={handleTextExtracted} isProcessing={isIndexing} />
                             </section>
                         </div>
                     </div>
                 ) : (
-                    /* Chat Window - Default View */
                     <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500">
                         <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 scroll-smooth">
-                            {messages.length === 0 && (
-                                <div className="h-full flex flex-col items-center justify-center max-w-md mx-auto text-center space-y-6">
-                                    <div className="w-20 h-20 bg-neutral-900 rounded-3xl flex items-center justify-center border border-neutral-800 shadow-xl">
-                                        <Scale className="w-10 h-10 text-cyan-500" />
+                            <div className="mx-auto transition-all duration-300" style={{ maxWidth: `${chatWidth}px` }}>
+                                {messages.length === 0 && (
+                                    <div className="h-full flex flex-col items-center justify-center max-w-md mx-auto text-center space-y-6 py-20">
+                                        <div className="w-20 h-20 bg-neutral-900 rounded-3xl flex items-center justify-center border border-neutral-800 shadow-xl"><Scale className="w-10 h-10 text-cyan-500" /></div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-white mb-2">您好，{userName}</h2>
+                                            <p className="text-neutral-500 text-sm leading-relaxed">我是您的法律助手。目前以「{userRole}」視角為您提供建議。</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-white mb-2">您好，我是您的法律助手</h2>
-                                        <p className="text-neutral-500 text-sm leading-relaxed">
-                                            您可以詢問法律問題、請我分析法規，或是上傳 PDF 文件進行專屬檢索。
-                                        </p>
+                                )}
+                                {messages.map((m, i) => (
+                                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300 mb-8`}>
+                                        <div className={`max-w-[85%] md:max-w-[80%] p-5 rounded-2xl prose prose-invert prose-sm shadow-2xl ${m.role === 'user' ? 'bg-cyan-600 text-white rounded-tr-none' : 'bg-neutral-900 text-neutral-200 border border-neutral-800 rounded-tl-none'}`}>
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                                        </div>
                                     </div>
-                                    <div className="grid grid-cols-1 gap-3 w-full">
-                                        <button 
-                                            onClick={() => setInput("如果我不投票會犯法嗎？")}
-                                            className="px-4 py-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-xs text-left text-neutral-400 transition-colors"
-                                        >
-                                            「如果我不投票會犯法嗎？」
-                                        </button>
-                                        <button 
-                                            onClick={() => setInput("請查一下勞基法關於特休的規定。")}
-                                            className="px-4 py-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-xs text-left text-neutral-400 transition-colors"
-                                        >
-                                            「請查一下勞基法關於特休的規定。」
-                                        </button>
+                                ))}
+                                {isThinking && (
+                                    <div className="flex justify-start mb-8">
+                                        <div className="bg-neutral-900 p-5 rounded-2xl rounded-tl-none border border-neutral-800 shadow-xl flex gap-1.5 items-center">
+                                            <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                            <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                            <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" />
+                                        </div>
                                     </div>
-                                    {!isLoaded && (
-                                        <p className="text-[10px] text-neutral-600 uppercase tracking-tighter">請先點擊右上角「啟動 AI」以開始對話</p>
-                                    )}
-                                </div>
-                            )}
-                            {messages.map((m, i) => (
-                                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                                    <div className={`max-w-[85%] md:max-w-[75%] p-5 rounded-2xl prose prose-invert prose-sm shadow-2xl ${
-                                        m.role === 'user' 
-                                        ? 'bg-cyan-600 text-white rounded-tr-none' 
-                                        : 'bg-neutral-900 text-neutral-200 border border-neutral-800 rounded-tl-none'
-                                    }`}>
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                            {m.content}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
-                            ))}
-                            {isThinking && (
-                                <div className="flex justify-start">
-                                    <div className="bg-neutral-900 p-5 rounded-2xl rounded-tl-none border border-neutral-800 shadow-xl flex gap-1.5 items-center">
-                                        <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                        <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                        <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" />
-                                    </div>
-                                </div>
-                            )}
-                            <div ref={messagesEndRef} />
+                                )}
+                                <div ref={messagesEndRef} />
+                            </div>
                         </div>
 
-                        {/* Input Area */}
                         <div className="p-6 md:p-10 bg-gradient-to-t from-neutral-950 via-neutral-950 to-transparent">
-                            <div className="max-w-4xl mx-auto relative group">
+                            <div className="mx-auto relative group transition-all duration-300" style={{ maxWidth: `${chatWidth}px` }}>
                                 <div className="absolute -inset-1 bg-gradient-to-r from-cyan-600 to-purple-600 rounded-2xl blur opacity-10 group-focus-within:opacity-30 transition-opacity" />
                                 <div className="relative flex gap-3 bg-neutral-900 p-2.5 rounded-2xl border border-neutral-800 shadow-2xl items-end">
-                                    <textarea 
-                                        value={input}
-                                        onChange={(e) => setInput(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                handleSendMessage();
-                                            }
-                                        }}
-                                        placeholder={isLoaded ? "輸入法律問題 (Shift+Enter 換行)..." : "請點擊右上角啟動 AI..."}
-                                        disabled={!isLoaded || isThinking}
-                                        rows={1}
-                                        className="flex-1 bg-transparent border-none px-4 py-3 focus:outline-none text-white placeholder:text-neutral-600 resize-none min-h-[50px] max-h-[200px]"
-                                        style={{ height: 'auto' }}
-                                        onInput={(e) => {
-                                            const target = e.target as HTMLTextAreaElement;
-                                            target.style.height = 'auto';
-                                            target.style.height = target.scrollHeight + 'px';
-                                        }}
-                                    />
-                                    <button 
-                                        onClick={handleSendMessage}
-                                        disabled={isThinking || !isLoaded || !input.trim()}
-                                        className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-20 p-4 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"
-                                    >
-                                        <Send className="w-5 h-5 text-white" />
-                                    </button>
+                                    <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isLoaded ? "輸入法律問題..." : "請啟動 AI..."} disabled={!isLoaded || isThinking} rows={1} className="flex-1 bg-transparent border-none px-4 py-3 focus:outline-none text-white placeholder:text-neutral-600 resize-none min-h-[50px] max-h-[200px]" onInput={(e) => { const target = e.target as HTMLTextAreaElement; target.style.height = 'auto'; target.style.height = target.scrollHeight + 'px'; }} />
+                                    <button onClick={handleSendMessage} disabled={isThinking || !isLoaded || !input.trim()} className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-20 p-4 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"><Send className="w-5 h-5 text-white" /></button>
                                 </div>
-                                <p className="mt-3 text-center text-[10px] text-neutral-600">
-                                    <ShieldCheck className="inline w-3 h-3 mr-1" /> 
-                                    所有對話資料皆受本地加密保護，重新整理頁面即清除。
-                                </p>
+                                <div className="mt-3 flex justify-between items-center text-[8px] text-neutral-600 uppercase tracking-widest px-2">
+                                    <span><ShieldCheck className="inline w-2.5 h-2.5 mr-1" /> End-to-End Local Privacy</span>
+                                    <span>Session: {formatSize(sessionSize.messages + sessionSize.vectors)}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
