@@ -17,8 +17,8 @@ export function useWebLLM() {
         };
 
         try {
-            // Using a small, efficient model for better web performance
-            const selectedModel = "Llama-3.1-8B-Instruct-q4f32_1-MLC";
+            // Using Gemma model as requested
+            const selectedModel = "gemma-2b-it-q4f32_1-MLC";
             const newEngine = await webllm.CreateMLCEngine(
                 selectedModel,
                 { initProgressCallback }

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWebLLM } from './hooks/useWebLLM';
 import { tool_getTime, tool_searchLaw, tool_runMath } from './hooks/useLegalTools';
+import { useEmbedding, VectorChunk } from './hooks/useEmbedding';
+import { FileIngestion } from './components/FileIngestion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Scale, Send, ShieldCheck, Info, Loader2, Clock, Search, Calculator } from 'lucide-react';
+import { Scale, Send, ShieldCheck, Info, Loader2, Clock, Search, Calculator, Database } from 'lucide-react';
 
 interface Message {
     role: 'user' | 'assistant' | 'system';
@@ -12,6 +14,8 @@ interface Message {
 
 function App() {
     const { engine, progress, status, isLoaded, init } = useWebLLM();
+    const { indexDocument, getEmbedding, cosineSimilarity, isIndexing } = useEmbedding();
+    const [vectorDB, setVectorDB] = useState<VectorChunk[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
@@ -24,6 +28,11 @@ function App() {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    const handleTextExtracted = async (text: string, fileName: string) => {
+        const newChunks = await indexDocument(text, fileName);
+        setVectorDB(prev => [...prev, ...newChunks]);
+    };
 
     const handleSendMessage = async () => {
         if (!input.trim() || !engine || isThinking) return;
@@ -38,7 +47,8 @@ function App() {
                 "你有權限使用以下工具（若需要請輸出對應的指令並停止）：\n" +
                 "- [CALL: get_current_time()] 獲取現在時間\n" +
                 "- [CALL: run_math_calculation(expression=\"...\")] 進行數學計算\n" +
-                "- [CALL: search_taiwan_law(query=\"...\")] 查詢台灣法律資訊\n\n" +
+                "- [CALL: search_taiwan_law(query=\"...\")] 查詢台灣法律資訊\n" +
+                "- [CALL: search_local_docs(query=\"...\")] 搜尋使用者上傳的本地文件\n\n" +
                 "請先判斷是否需要工具，若不需要則直接回答。" 
             },
             ...messages.map(m => ({ role: m.role, content: m.content })),
@@ -54,7 +64,6 @@ function App() {
                 });
 
                 let responseText = "";
-                // Placeholder for streaming
                 setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
                 for await (const chunk of chunks) {
@@ -66,10 +75,10 @@ function App() {
                     });
                 }
 
-                // Tool detection logic
                 const timeMatch = responseText.match(/\[CALL:\s*get_current_time\s*\(\)\]/);
                 const mathMatch = responseText.match(/\[CALL:\s*run_math_calculation\(expression="([^"]+)"\)\]/);
                 const lawMatch = responseText.match(/\[CALL:\s*search_taiwan_law\(query="([^"]+)"\)\]/);
+                const localMatch = responseText.match(/\[CALL:\s*search_local_docs\(query="([^"]+)"\)\]/);
 
                 let toolResult = "";
                 let matchedCall = "";
@@ -77,6 +86,17 @@ function App() {
                 if (timeMatch) { toolResult = tool_getTime(); matchedCall = timeMatch[0]; }
                 else if (mathMatch) { toolResult = tool_runMath(mathMatch[1]); matchedCall = mathMatch[0]; }
                 else if (lawMatch) { toolResult = await tool_searchLaw(lawMatch[1]); matchedCall = lawMatch[0]; }
+                else if (localMatch && vectorDB.length > 0) {
+                    const queryEmb = await getEmbedding(localMatch[1]);
+                    const scored = vectorDB.map(chunk => ({
+                        ...chunk,
+                        score: cosineSimilarity(queryEmb, chunk.embedding)
+                    })).sort((a, b) => b.score - a.score).slice(0, 3);
+                    toolResult = scored.length > 0 
+                        ? scored.map(s => `來自 [${s.source}]: ${s.text}`).join('\n\n')
+                        : "在本地文件中找不到相關資訊。";
+                    matchedCall = localMatch[0];
+                }
 
                 if (toolResult) {
                     const toolMsg = `\n\n🛠️ **工具執行**: \`${matchedCall}\`\n\n${toolResult}\n\n---`;
@@ -109,7 +129,7 @@ function App() {
                     </div>
                     <div>
                         <h1 className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
-                            台灣法律助手 <span className="text-xs font-medium bg-neutral-800 px-2 py-1 rounded text-neutral-400 uppercase tracking-widest">v1.0 (Draft)</span>
+                            台灣法律助手 <span className="text-xs font-medium bg-neutral-800 px-2 py-1 rounded text-neutral-400 uppercase tracking-widest">v1.1 (RAG Enabled)</span>
                         </h1>
                         <p className="text-neutral-500 text-sm mt-1 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4" /> 隱私加密：所有對話與模型運算均在您的瀏覽器本地完成
@@ -139,7 +159,6 @@ function App() {
             </header>
 
             <main className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-8">
-                {/* Sidebar */}
                 <aside className="lg:col-span-1 space-y-6">
                     <section className="bg-neutral-900/50 backdrop-blur-sm p-6 rounded-2xl border border-neutral-800">
                         <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-500 mb-4 flex items-center gap-2">
@@ -148,11 +167,11 @@ function App() {
                         <div className="space-y-4">
                             <div>
                                 <p className="text-xs text-neutral-500 mb-1">運行模型</p>
-                                <p className="text-sm font-medium text-white">Llama 3.1 8B (Quantized)</p>
+                                <p className="text-sm font-medium text-white">Gemma 2B (Quantized)</p>
                             </div>
                             <div>
                                 <p className="text-xs text-neutral-500 mb-1">狀態</p>
-                                <p className="text-sm font-medium text-cyan-400">{status}</p>
+                                <p className="text-sm font-medium text-cyan-400 truncate">{status}</p>
                                 {progress > 0 && progress < 100 && (
                                     <div className="w-full bg-neutral-800 h-1.5 rounded-full mt-2 overflow-hidden">
                                         <div className="bg-cyan-500 h-full transition-all duration-300" style={{ width: `${progress}%` }} />
@@ -164,7 +183,19 @@ function App() {
 
                     <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800">
                         <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-500 mb-4 flex items-center gap-2">
-                            可用工具
+                            文件工具
+                        </h2>
+                        <FileIngestion onTextExtracted={handleTextExtracted} isProcessing={isIndexing} />
+                        {vectorDB.length > 0 && (
+                            <div className="mt-4 flex items-center gap-2 text-xs font-bold text-emerald-500 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+                                <Database className="w-3 h-3" /> 已索引 {vectorDB.length} 個知識片段
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800">
+                        <h2 className="text-sm font-bold uppercase tracking-widest text-neutral-500 mb-4">
+                            具備能力
                         </h2>
                         <ul className="space-y-3">
                             <li className="flex items-center gap-3 text-sm text-neutral-400">
@@ -180,8 +211,7 @@ function App() {
                     </section>
                 </aside>
 
-                {/* Chat Area */}
-                <div className="lg:col-span-3 flex flex-col h-[600px] bg-neutral-900 rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden relative">
+                <div className="lg:col-span-3 flex flex-col h-[650px] bg-neutral-900 rounded-3xl border border-neutral-800 shadow-2xl overflow-hidden relative">
                     <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-neutral-800 scrollbar-track-transparent">
                         {messages.length === 0 && (
                             <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-50">
@@ -190,7 +220,7 @@ function App() {
                                 </div>
                                 <div>
                                     <p className="text-xl font-medium text-neutral-400">請開始您的法律諮詢</p>
-                                    <p className="text-sm text-neutral-500">例如：勞基法關於特休的規定是什麼？</p>
+                                    <p className="text-sm text-neutral-500">上傳 PDF 後，我將優先檢索文件內容</p>
                                 </div>
                             </div>
                         )}
@@ -225,7 +255,7 @@ function App() {
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                                placeholder={isLoaded ? "請描述您的法律問題..." : "請先點擊上方按鈕載入 AI..."}
+                                placeholder={isLoaded ? "請描述您的法律問題..." : "請先啟動 AI..."}
                                 disabled={!isLoaded || isThinking}
                                 className="flex-1 bg-transparent border-none px-4 py-2 focus:outline-none text-white placeholder:text-neutral-500"
                             />
@@ -242,7 +272,7 @@ function App() {
             </main>
 
             <footer className="max-w-5xl mx-auto mt-12 text-center text-neutral-600 text-xs">
-                <p>© 2026 台灣法律助手 | 本工具僅供參考，不構成正式法律意見。如有法律需求請尋求專業律師協助。</p>
+                <p>© 2026 台灣法律助手 | 所有運算均在瀏覽器內存中進行，重新整理網頁將會清除對話歷史與索引文件。</p>
             </footer>
         </div>
     );
