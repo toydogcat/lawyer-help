@@ -53,6 +53,17 @@ function App() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
+    // Visitor Counter Injection (Fix for React SPA timing issue)
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = "https://www.vercount.one/js";
+        script.async = true;
+        document.head.appendChild(script);
+        return () => {
+            document.head.removeChild(script);
+        };
+    }, []);
+
     const categories = ['全部', ...new Set(Object.values(LEGAL_TEMPLATES).map(t => t.category))];
 
     const { isListening, startListening, stopListening } = useSpeechRecognition((text) => {
@@ -465,8 +476,22 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                                     <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isLoaded ? (isListening ? "正在聆聽..." : "輸入內容或請我代寫文件...") : "請啟動 AI..."} disabled={!isLoaded || isThinking} rows={1} className="flex-1 bg-transparent border-none px-4 py-3 focus:outline-none text-white placeholder:text-neutral-600 resize-none min-h-[50px] max-h-[200px]" onInput={(e) => { const target = e.target as HTMLTextAreaElement; target.style.height = 'auto'; target.style.height = target.scrollHeight + 'px'; }} />
                                     <button onClick={handleSendMessage} disabled={isThinking || !isLoaded || !input.trim()} className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-20 p-4 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"><Send className="w-5 h-5 text-white" /></button>
                                 </div>
-                                <div className="mt-3 flex justify-between items-center text-[8px] text-neutral-600 uppercase tracking-widest px-2">
-                                    <span><ShieldCheck className="inline w-2.5 h-2.5 mr-1" /> End-to-End Local Privacy</span>
+                                <div className="mt-3 flex flex-wrap justify-between items-center text-[8px] text-neutral-600 uppercase tracking-widest px-2 gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <span><ShieldCheck className="inline w-2.5 h-2.5 mr-1" /> End-to-End Local Privacy</span>
+                                        <span className="flex items-center gap-1.5">
+                                            <Activity className="w-2.5 h-2.5" /> 
+                                            總瀏覽 <span id="busuanzi_value_site_pv" className="font-bold text-neutral-500">...</span>
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <MessageSquare className="w-2.5 h-2.5" /> 
+                                            本頁 <span id="busuanzi_value_page_pv" className="font-bold text-neutral-500">...</span>
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <User className="w-2.5 h-2.5" /> 
+                                            訪客 <span id="busuanzi_value_site_uv" className="font-bold text-neutral-500">...</span>
+                                        </span>
+                                    </div>
                                     <span>Session: {formatSize(sessionSize.messages + sessionSize.vectors)}</span>
                                 </div>
                             </div>
