@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWebLLM } from './hooks/useWebLLM';
 import { tool_getTime, tool_searchLaw, tool_runMath } from './hooks/useLegalTools';
-import { useEmbedding, VectorChunk } from './hooks/useEmbedding';
+import { useEmbedding, type VectorChunk } from './hooks/useEmbedding';
 import { FileIngestion } from './components/FileIngestion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
