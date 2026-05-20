@@ -8,5 +8,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: './', // Using relative path for GitHub Pages compatibility
+  base: '/lawyer-help/', // Specific base path for GitHub Pages sub-directory
 })
