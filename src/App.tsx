@@ -1,14 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWebLLM } from './hooks/useWebLLM';
-import { tool_getTime, tool_searchLaw, tool_runMath } from './hooks/useLegalTools';
+import { tool_getTime, tool_searchLaw } from './hooks/useLegalTools';
 import { useEmbedding, type VectorChunk } from './hooks/useEmbedding';
 import { FileIngestion } from './components/FileIngestion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { 
-    Scale, Send, ShieldCheck, Settings, MessageSquare, Info, Loader2, 
-    Clock, Search, Calculator, Database, X, RotateCcw, User, Cpu, Trash2, CheckCircle2,
-    Maximize2, Activity, Sliders
+    Scale, Send, ShieldCheck, Settings, MessageSquare, Loader2, 
+    Database, X, RotateCcw, User, Trash2, Maximize2, Activity, Sliders
 } from 'lucide-react';
 
 interface Message {
@@ -17,7 +16,7 @@ interface Message {
 }
 
 function App() {
-    const { engine, progress, status, isLoaded, init } = useWebLLM();
+    const { engine, status, isLoaded, init } = useWebLLM();
     const { indexDocument, getEmbedding, cosineSimilarity, isIndexing } = useEmbedding();
     
     // State
@@ -30,7 +29,6 @@ function App() {
     // User Prefs
     const [userName, setUserName] = useState('使用者');
     const [userRole, setUserRole] = useState('一般民眾');
-    const [autoClearPDF, setAutoClearPDF] = useState(false);
     const [chatWidth, setChatWidth] = useState(800);
     
     // LLM Parameters
@@ -53,7 +51,6 @@ function App() {
         if (window.confirm("確定要清除所有對話紀錄嗎？")) {
             setMessages([]);
             setIsThinking(false);
-            if (autoClearPDF) setVectorDB([]);
         }
     };
 
@@ -112,8 +109,6 @@ function App() {
                     stream: true,
                     temperature: temperature,
                     top_p: topP,
-                    // Note: web-llm currently might not support top_k in all engines via this interface, 
-                    // but we include it for future-proofing/compatibility where available.
                 });
 
                 let responseText = "";
