@@ -41,7 +41,6 @@ function App() {
     // LLM Parameters
     const [temperature, setTemperature] = useState(0.7);
     const [topP, setTopP] = useState(0.95);
-    const [topK, setTopK] = useState(40);
     
     // Memory Analytics
     const [sessionSize, setSessionSize] = useState({ messages: 0, vectors: 0 });
