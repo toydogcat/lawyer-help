@@ -34,3 +34,6 @@ dist-ssr
 *.tsbuildinfo
 package-lock.json
 EOF
+
+# Tmp
+TMP/

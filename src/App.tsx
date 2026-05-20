@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useWebLLM } from './hooks/useWebLLM';
 import { tool_getTime, tool_searchLaw } from './hooks/useLegalTools';
 import { useEmbedding, type VectorChunk } from './hooks/useEmbedding';
+import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { FileIngestion } from './components/FileIngestion';
 import { LEGAL_TEMPLATES } from './constants/templates';
 import ReactMarkdown from 'react-markdown';
@@ -11,7 +13,7 @@ import jsPDF from 'jspdf';
 import { 
     Scale, Send, ShieldCheck, Settings, MessageSquare, Loader2, 
     Database, X, RotateCcw, User, Trash2, Maximize2, Activity, Sliders,
-    FilePlus, Download, Check, AlertTriangle, BookOpen
+    FilePlus, Download, Check, AlertTriangle, BookOpen, Mic, MicOff, Volume2, VolumeX, Speaker
 } from 'lucide-react';
 
 interface Message {
@@ -23,6 +25,7 @@ interface Message {
 function App() {
     const { engine, status, isLoaded, init } = useWebLLM();
     const { indexDocument, getEmbedding, cosineSimilarity, isIndexing } = useEmbedding();
+    const { speak, stop: stopSpeaking, isSpeaking } = useSpeechSynthesis();
     
     // State
     const [vectorDB, setVectorDB] = useState<VectorChunk[]>([]);
@@ -37,6 +40,8 @@ function App() {
     const [userName, setUserName] = useState('使用者');
     const [userRole, setUserRole] = useState('一般民眾');
     const [chatWidth, setChatWidth] = useState(800);
+    const [autoSpeak, setAutoSpeak] = useState(false);
+    const [voiceRate, setVoiceRate] = useState(1.1);
     
     // LLM Parameters
     const [temperature, setTemperature] = useState(0.7);
@@ -50,6 +55,10 @@ function App() {
 
     const categories = ['全部', ...new Set(Object.values(LEGAL_TEMPLATES).map(t => t.category))];
 
+    const { isListening, startListening, stopListening } = useSpeechRecognition((text) => {
+        setInput(prev => prev + text);
+    });
+
     useEffect(() => {
         const msgSize = messages.reduce((acc, m) => acc + (m.content.length * 2), 0);
         const vecSize = vectorDB.reduce((acc, v) => acc + (v.text.length * 2) + (v.embedding.length * 4), 0);
@@ -60,6 +69,7 @@ function App() {
         if (window.confirm("確定要清除所有對話紀錄嗎？")) {
             setMessages([]);
             setIsThinking(false);
+            stopSpeaking();
         }
     };
 
@@ -125,6 +135,7 @@ function App() {
         setInput('');
         setMessages(prev => [...prev, { role: 'user', content: userQuery }]);
         setIsThinking(true);
+        stopSpeaking();
 
         const isDrafting = userQuery.includes("代寫") || userQuery.includes("契約") || userQuery.includes("訴狀") || userQuery.includes("協議書") || userQuery.includes("和解書");
 
@@ -145,6 +156,7 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
 
         try {
             let loopCount = 0;
+            let finalResponseText = "";
             while (loopCount < 5) {
                 const chunks = await engine.chat.completions.create({
                     messages: currentMessages,
@@ -165,6 +177,7 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                     });
                 }
 
+                finalResponseText = responseText;
                 const timeMatch = responseText.match(/\[CALL:\s*get_current_time\s*\(\)\]/);
                 const lawMatch = responseText.match(/\[CALL:\s*search_taiwan_law\(query="([^"]+)"\)\]/);
                 const localMatch = responseText.match(/\[CALL:\s*search_local_docs\(query="([^"]+)"\)\]/);
@@ -197,6 +210,13 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                 }
                 break;
             }
+
+            if (autoSpeak && finalResponseText) {
+                // Remove Markdown markers and tool calls for better TTS
+                const cleanText = finalResponseText.replace(/\[CALL:.*?\]/g, "").replace(/[#*`]/g, "");
+                speak(cleanText, voiceRate);
+            }
+
         } catch (err) {
             console.error(err);
         } finally {
@@ -241,9 +261,14 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                 <header className="px-8 py-4 border-b border-neutral-900 bg-black/20 flex justify-between items-center backdrop-blur-md">
                     <div>
                         <h1 className="text-lg font-bold text-white flex items-center gap-2">台灣法律助手 <span className="text-[10px] bg-cyan-500/10 text-cyan-500 px-1.5 py-0.5 rounded border border-cyan-500/20">PRO</span></h1>
-                        <p className="text-xs text-neutral-500">Local AI & RAG Engine</p>
+                        <p className="text-xs text-neutral-500">Local AI & Voice Ready</p>
                     </div>
                     <div className="flex items-center gap-4">
+                        {isSpeaking && (
+                            <button onClick={stopSpeaking} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg animate-pulse">
+                                <VolumeX className="w-5 h-5" />
+                            </button>
+                        )}
                         {isLoaded && activeTab === 'chat' && !showSettings && (
                             <button onClick={() => handleResetSession()} className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-all" title="重新開始對話">
                                 <RotateCcw className="w-5 h-5" />
@@ -277,6 +302,29 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                                     </select>
                                 </div>
                             </section>
+
+                            {/* Voice Settings */}
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Speaker className="w-4 h-4 text-orange-500" /> 語音設定</h3>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between p-3 bg-black/40 rounded-xl border border-neutral-800">
+                                        <div className="text-xs text-neutral-300">自動朗讀回答</div>
+                                        <button 
+                                            onClick={() => setAutoSpeak(!autoSpeak)}
+                                            className={`w-10 h-5 rounded-full transition-colors relative ${autoSpeak ? 'bg-orange-600' : 'bg-neutral-800'}`}
+                                        >
+                                            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${autoSpeak ? 'right-1' : 'left-1'}`} />
+                                        </button>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                            <label className="text-neutral-500 font-bold uppercase">語音速度 ({voiceRate}x)</label>
+                                        </div>
+                                        <input type="range" min="0.5" max="2" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="w-full accent-orange-500 bg-neutral-800 h-1 rounded-lg appearance-none cursor-pointer" />
+                                    </div>
+                                </div>
+                            </section>
+
                             <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
                                 <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Sliders className="w-4 h-4 text-emerald-500" /> 生成參數控制</h3>
                                 <div className="space-y-4">
@@ -323,7 +371,6 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                             <p className="text-neutral-500">依據台灣法律實務分類，選擇範本進行專業代寫</p>
                         </div>
 
-                        {/* Category Filter */}
                         <div className="flex flex-wrap justify-center gap-2 mb-8">
                             {categories.map(cat => (
                                 <button 
@@ -342,20 +389,14 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {filteredTemplates.map(([key, t]) => (
-                                <div 
-                                    key={key}
-                                    className="flex flex-col bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden group hover:border-cyan-500/50 transition-all"
-                                >
+                                <div key={key} className="flex flex-col bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden group hover:border-cyan-500/50 transition-all">
                                     <div className="p-6 flex-1">
                                         <div className="flex justify-between items-start mb-4">
-                                            <div className="p-2 bg-neutral-800 rounded-lg">
-                                                <BookOpen className="w-5 h-5 text-cyan-500" />
-                                            </div>
+                                            <div className="p-2 bg-neutral-800 rounded-lg"><BookOpen className="w-5 h-5 text-cyan-500" /></div>
                                             <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">{t.category}</span>
                                         </div>
                                         <h3 className="text-lg font-bold text-white mb-2">{t.title}</h3>
                                         <p className="text-xs text-neutral-500 leading-relaxed mb-4">{t.description}</p>
-                                        
                                         {t.notice && (
                                             <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl flex gap-2 items-start mb-4">
                                                 <AlertTriangle className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
@@ -363,18 +404,12 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                                             </div>
                                         )}
                                     </div>
-                                    <button 
-                                        onClick={() => handleSelectTemplate(key)}
-                                        className="w-full py-4 bg-neutral-800 hover:bg-cyan-600 text-neutral-400 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-2 border-t border-neutral-800"
-                                    >
-                                        開始專業代寫 <Check className="w-4 h-4" />
-                                    </button>
+                                    <button onClick={() => handleSelectTemplate(key)} className="w-full py-4 bg-neutral-800 hover:bg-cyan-600 text-neutral-400 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-2 border-t border-neutral-800">開始專業代寫 <Check className="w-4 h-4" /></button>
                                 </div>
                             ))}
                         </div>
                     </div>
                 ) : (
-                    /* Chat View */
                     <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500">
                         <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 scroll-smooth">
                             <div className="mx-auto transition-all duration-300" style={{ maxWidth: `${chatWidth}px` }}>
@@ -382,7 +417,7 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                                     <div className="h-full flex flex-col items-center justify-center max-w-md mx-auto text-center space-y-6 py-20">
                                         <div className="w-20 h-20 bg-neutral-900 rounded-3xl flex items-center justify-center border border-neutral-800 shadow-xl"><Scale className="w-10 h-10 text-cyan-500" /></div>
                                         <h2 className="text-2xl font-bold text-white">您好，{userName}</h2>
-                                        <p className="text-neutral-500 text-sm leading-relaxed">您可以直接詢問法律問題，或切換到「範本中心」進行專業法律文書代寫。</p>
+                                        <p className="text-neutral-500 text-sm leading-relaxed">您可以直接詢問法律問題，或使用語音輸入。</p>
                                     </div>
                                 )}
                                 {messages.map((m, i) => (
@@ -391,15 +426,14 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                                             <div id={`msg-content-${i}`} className={`p-6 rounded-2xl prose prose-invert prose-sm shadow-2xl ${m.role === 'user' ? 'bg-cyan-600 text-white rounded-tr-none' : 'bg-neutral-900 text-neutral-200 border border-neutral-800 rounded-tl-none'}`}>
                                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                                             </div>
-                                            {m.role === 'assistant' && (
-                                                <button 
-                                                    onClick={() => exportToPDF(i)}
-                                                    className="absolute -right-12 top-0 p-2 text-neutral-500 hover:text-cyan-500 opacity-0 group-hover:opacity-100 transition-all"
-                                                    title="匯出為 PDF"
-                                                >
-                                                    <Download className="w-5 h-5" />
-                                                </button>
-                                            )}
+                                            <div className="absolute -right-12 top-0 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                                {m.role === 'assistant' && (
+                                                    <>
+                                                        <button onClick={() => exportToPDF(i)} className="p-2 text-neutral-500 hover:text-cyan-500" title="匯出為 PDF"><Download className="w-5 h-5" /></button>
+                                                        <button onClick={() => speak(m.content.replace(/\[CALL:.*?\]/g, "").replace(/[#*`]/g, ""), voiceRate)} className="p-2 text-neutral-500 hover:text-orange-500" title="語音朗讀"><Volume2 className="w-5 h-5" /></button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -421,7 +455,14 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                             <div className="mx-auto relative group transition-all duration-300" style={{ maxWidth: `${chatWidth}px` }}>
                                 <div className="absolute -inset-1 bg-gradient-to-r from-cyan-600 to-purple-600 rounded-2xl blur opacity-10 group-focus-within:opacity-30 transition-opacity" />
                                 <div className="relative flex gap-3 bg-neutral-900 p-2.5 rounded-2xl border border-neutral-800 shadow-2xl items-end">
-                                    <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isLoaded ? "輸入內容或請我代寫文件..." : "請啟動 AI..."} disabled={!isLoaded || isThinking} rows={1} className="flex-1 bg-transparent border-none px-4 py-3 focus:outline-none text-white placeholder:text-neutral-600 resize-none min-h-[50px] max-h-[200px]" onInput={(e) => { const target = e.target as HTMLTextAreaElement; target.style.height = 'auto'; target.style.height = target.scrollHeight + 'px'; }} />
+                                    <button 
+                                        onClick={isListening ? stopListening : startListening}
+                                        className={`p-3 rounded-xl transition-all ${isListening ? 'bg-rose-600 text-white animate-pulse' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
+                                        title={isListening ? "停止錄音" : "語音輸入"}
+                                    >
+                                        {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                                    </button>
+                                    <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isLoaded ? (isListening ? "正在聆聽..." : "輸入內容或請我代寫文件...") : "請啟動 AI..."} disabled={!isLoaded || isThinking} rows={1} className="flex-1 bg-transparent border-none px-4 py-3 focus:outline-none text-white placeholder:text-neutral-600 resize-none min-h-[50px] max-h-[200px]" onInput={(e) => { const target = e.target as HTMLTextAreaElement; target.style.height = 'auto'; target.style.height = target.scrollHeight + 'px'; }} />
                                     <button onClick={handleSendMessage} disabled={isThinking || !isLoaded || !input.trim()} className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-20 p-4 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"><Send className="w-5 h-5 text-white" /></button>
                                 </div>
                                 <div className="mt-3 flex justify-between items-center text-[8px] text-neutral-600 uppercase tracking-widest px-2">
