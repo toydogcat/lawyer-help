@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { pipeline } from '@xenova/transformers';
+import { pipeline } from '@huggingface/transformers';
 
 export interface VectorChunk {
     id: number;
@@ -7,6 +7,9 @@ export interface VectorChunk {
     embedding: number[];
     source: string;
 }
+
+// Ensure WebGPU isn't used for embedding if we want strict Wasm, but actually bge-small-zh is fine.
+// The user specified "Target Embedding: Xenova/bge-small-zh-v1.5"
 
 export function useEmbedding() {
     const [isIndexing, setIsIndexing] = useState(false);

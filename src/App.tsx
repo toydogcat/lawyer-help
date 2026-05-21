@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWebLLM } from './hooks/useWebLLM';
+import { useWasmLLM } from './hooks/useWasmLLM';
 import { tool_getTime, tool_searchLaw } from './hooks/useLegalTools';
 import { useEmbedding, type VectorChunk } from './hooks/useEmbedding';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -23,7 +24,26 @@ interface Message {
 }
 
 function App() {
-    const { engine, status, isLoaded, init } = useWebLLM();
+    const webLLM = useWebLLM();
+    const wasmLLM = useWasmLLM();
+    const [engineType, setEngineType] = useState<'webgpu' | 'wasm' | null>(null);
+
+    useEffect(() => {
+        if (!navigator.gpu) {
+            console.warn("WebGPU is not supported. Falling back to Wasm mode.");
+            setEngineType('wasm');
+        } else {
+            console.log("WebGPU is supported! Using WebGPU mode.");
+            setEngineType('webgpu');
+        }
+    }, []);
+
+    const activeEngine = engineType === 'webgpu' ? webLLM : engineType === 'wasm' ? wasmLLM : null;
+    const engine = activeEngine?.engine;
+    const status = activeEngine?.status || "等待初始化";
+    const isLoaded = activeEngine?.isLoaded || false;
+    const init = activeEngine?.init || (() => {});
+
     const { indexDocument, getEmbedding, cosineSimilarity, isIndexing } = useEmbedding();
     const { speak, stop: stopSpeaking, isSpeaking } = useSpeechSynthesis();
     
