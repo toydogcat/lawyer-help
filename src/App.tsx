@@ -323,6 +323,25 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
+                                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><Cpu className="w-4 h-4 text-cyan-500" /> 運算引擎與模型</h3>
+                                <div className="space-y-3">
+                                    <select 
+                                        value={engineType || ''} 
+                                        onChange={(e) => setEngineType(e.target.value as 'webgpu' | 'wasm')} 
+                                        disabled={isLoaded}
+                                        className="w-full bg-black/40 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <option value="webgpu">WebGPU (高效能 / 適合電腦)</option>
+                                        <option value="wasm">Wasm (省記憶體 / 手機或備用)</option>
+                                    </select>
+                                    <div className="text-xs text-neutral-500 leading-relaxed bg-black/30 p-3 rounded-lg border border-neutral-800">
+                                        <div className="mb-1"><span className="font-bold text-neutral-400">目前模型：</span>{engineType === 'webgpu' ? 'Gemma 2B (gemma-2b-it-q4f32_1-MLC)' : 'Qwen2.5 0.5B (Wasm Q4)'}</div>
+                                        <div className="text-[10px] text-amber-500/80 mt-2">💡 若您原本在電腦上使用很順暢，但現在變得卡頓，可能是瀏覽器環境導致自動切換到了 Wasm 模式。您可以手動在此切換回 WebGPU。(切換後請重整頁面或重新啟動 AI)</div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="bg-neutral-900/50 p-6 rounded-2xl border border-neutral-800 space-y-4">
                                 <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-2"><User className="w-4 h-4 text-purple-500" /> 使用者認知</h3>
                                 <div className="space-y-3">
                                     <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} className="w-full bg-black/40 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-purple-500" placeholder="稱呼" />
