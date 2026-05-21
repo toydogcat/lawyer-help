@@ -178,6 +178,11 @@ function App() {
    [CALL: search_taiwan_law(query="你要查的法規與條號")]
 3. 你的回答必須是嚴謹的繁體中文。直接給出分析，不要有任何多餘的寒暄或道歉。
 
+【資料核對指令】：
+1. 當你閱讀【工具回傳】的內容時，必須嚴格檢查回傳內容是否「確實包含」使用者詢問的法規與條號。
+2. 如果工具回傳的內容與使用者詢問的法規「不相符」（例如：問勞基法卻回傳香港國安法、或者只回傳歷史背景），你必須在回答中明確指出：「工具檢索結果未包含該條文，以下僅就現有資料分析...」。
+3. 絕對嚴禁將 A 法規的條文內容，冠上 B 法規的名稱來回答！
+
 可用工具：
 [CALL: search_taiwan_law(query="...")]
 [CALL: search_local_docs(query="...")]
@@ -185,10 +190,18 @@ function App() {
 
 ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條款專業且完全符合台灣民法、勞基法及相關法律慣例。" : ""}`;
 
+        let autoSearchContext = "";
+        const lawMatchRegex = userQuery.match(/(.+法)\s*第\s*([0-9一二三四五六七八九十百千]+)\s*條/);
+        if (lawMatchRegex) {
+            const query = `${lawMatchRegex[1]}第${lawMatchRegex[2]}條`;
+            const result = await tool_searchLaw(query);
+            autoSearchContext = `\n\n【系統自動預先檢索資料】\n檢索關鍵字：${query}\n結果：\n${result}\n請根據上述資料回答。若資料無關，請明確說明未找到該法條。`;
+        }
+
         const currentMessages: any[] = [
             { role: "system", content: systemPrompt },
             ...messages.map(m => ({ role: m.role, content: m.content })),
-            { role: "user", content: userQuery }
+            { role: "user", content: userQuery + autoSearchContext }
         ];
 
         try {

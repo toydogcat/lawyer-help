@@ -4,8 +4,23 @@ export const tool_getTime = () => {
 
 export const tool_searchLaw = async (query: string) => {
     try {
+        // 1. Try local mock database first (for demo/fast-validation of core laws)
+        try {
+            const mockResp = await fetch('/laws_mock.json');
+            const mockData = await mockResp.json();
+            // Remove spaces and normalize query for matching
+            const normalizedQuery = query.replace(/\s+/g, '');
+            for (const key in mockData) {
+                if (normalizedQuery.includes(key) || key.includes(normalizedQuery)) {
+                    return `【${key}】\n${mockData[key]}`;
+                }
+            }
+        } catch (e) {
+            console.warn("Local mock DB fetch failed or not found", e);
+        }
+
+        // 2. Fallback to Wikipedia API
         const encoded = encodeURIComponent(query + " 台灣法律");
-        // Using Wikipedia API as a source for legal concepts/terms in Taiwan
         const resp = await fetch(`https://zh.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encoded}&format=json&origin=*`);
         const data = await resp.json();
         
