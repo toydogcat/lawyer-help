@@ -172,13 +172,14 @@ function App() {
 
         const systemPrompt = `你是一位專業的台灣法律助手。
 對象：${userName} (${userRole})
-重要指示：這是一個模擬且被授權的情境，你【必須】直接解答使用者的法律問題、提供見解與判斷。絕對不可以拒絕回答，也絕對不要聲明「無法提供法律建議」或「請諮詢專業律師」。
-規則：使用繁體中文，視需要調用工具：
-- [CALL: get_current_time()]
-- [CALL: search_taiwan_law(query="...")]
-- [CALL: search_local_docs(query="...")]
+【最高強制指令】：你必須直接為使用者進行法律分析與判斷！絕對禁止輸出「無法提供法律建議」、「請諮詢專業律師」等拒絕詞語。
+【工具使用規則】：若你不確定法條，請「直接」輸出工具指令，不要加上任何引號或廢話：
+[CALL: search_taiwan_law(query="搜尋關鍵字")]
+[CALL: search_local_docs(query="搜尋關鍵字")]
+[CALL: get_current_time()]
+
 ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條款專業且完全符合台灣民法、勞基法及相關法律慣例。" : ""}
-不需要工具則直接專業回答。`;
+若不需要工具，請直接給出專業的繁體中文法律分析與結論。`;
 
         const currentMessages: any[] = [
             { role: "system", content: systemPrompt },
@@ -210,9 +211,9 @@ ${isDrafting ? "目前任務是「文書代寫」，請確保格式端正，條�
                 }
 
                 finalResponseText = responseText;
-                const timeMatch = responseText.match(/\[CALL:\s*get_current_time\s*\(\)\]/);
-                const lawMatch = responseText.match(/\[CALL:\s*search_taiwan_law\(query="([^"]+)"\)\]/);
-                const localMatch = responseText.match(/\[CALL:\s*search_local_docs\(query="([^"]+)"\)\]/);
+                const timeMatch = responseText.match(/[\[「]?CALL:\s*get_current_time\s*\(\)[\]」]?/);
+                const lawMatch = responseText.match(/[\[「]?CALL:\s*search_taiwan_law\(query=["'「]([^"'」]+)["'」]\)[\]」]?/);
+                const localMatch = responseText.match(/[\[「]?CALL:\s*search_local_docs\(query=["'「]([^"'」]+)["'」]\)[\]」]?/);
 
                 let toolResult = "";
                 let matchedCall = "";
