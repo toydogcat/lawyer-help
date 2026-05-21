@@ -14,7 +14,7 @@ import jsPDF from 'jspdf';
 import { 
     Scale, Send, ShieldCheck, Settings, MessageSquare, Loader2, 
     Database, X, RotateCcw, User, Trash2, Maximize2, Activity, Sliders,
-    FilePlus, Download, Check, AlertTriangle, BookOpen, Mic, MicOff, Volume2, VolumeX, Speaker
+    FilePlus, Download, Check, AlertTriangle, BookOpen, Mic, MicOff, Volume2, VolumeX, Speaker, Cpu
 } from 'lucide-react';
 
 interface Message {
